@@ -16,6 +16,7 @@ pragma solidity ^0.8.9;
 
 contract VotingContract {
     enum Status {
+        Empty,
         Created,
         Ongoing,
         Finished
@@ -25,9 +26,9 @@ contract VotingContract {
         address[] candidates;
         mapping(address => bool) isCandidate;
         mapping(address => uint) numberOfVotes;
-        address[] voters;
         mapping(address => address) voterChoices; // voter => candidate
-        Status votingStatus;
+        mapping(address => bool) isWinner;
+        Status votingStatus; // default Empty
         uint startsAt;
         uint endsAt;
         uint fee;
@@ -133,11 +134,10 @@ contract VotingContract {
         currentVoting.fee += voteFee;
 
         currentVoting.voterChoices[msg.sender] = _candidate;
-        currentVoting.voters.push(msg.sender);
         currentVoting.numberOfVotes[_candidate]++;
     }
 
-    function endVoting(uint _votingId) external {
+    function endVoting(uint _votingId) external onlyOwner {
         Voting storage currentVoting = votings[_votingId];
         require(currentVoting.votingStatus == Status.Ongoing);
         require(currentVoting.endsAt <= block.timestamp);
@@ -149,9 +149,11 @@ contract VotingContract {
     function winners(uint _votingId) external returns (address[] memory) {
         Voting storage currentVoting = votings[_votingId];
 
+        require(currentVoting.votingStatus == Status.Finished, "Voting not finished");
+
         uint candidatesCount = currentVoting.candidates.length;
         uint winnersCount;
-        uint maximumVotes;
+        uint maximumVotes = 0;
         address[] memory localWinners = new address[](candidatesCount);
 
         for (uint i = 0; i < candidatesCount; i++) {
@@ -160,12 +162,14 @@ contract VotingContract {
             if (currentVoting.numberOfVotes[nextCandidate] == maximumVotes) {
                 winnersCount += 1;
                 localWinners[winnersCount - 1] = nextCandidate;
+                currentVoting.isWinner[nextCandidate] = true;
             }
 
             if (currentVoting.numberOfVotes[nextCandidate] > maximumVotes) {
                 maximumVotes = currentVoting.numberOfVotes[nextCandidate];
                 winnersCount = 1;
                 localWinners[0] = nextCandidate;
+                currentVoting.isWinner[nextCandidate] = true;
             }
         }
 
@@ -189,19 +193,22 @@ contract VotingContract {
     function takeWinnersAmount(uint _votingId) external {
       Voting storage currentVoting = votings[_votingId];
 
-      require(allWinnersMapper[_votingId].length > 0, "Can't find any winners");
-      require(currentVoting.totalAmount > 0, "Prize money is already taken");
       require(currentVoting.votingStatus == Status.Finished, "Voting not finished");
+      require(currentVoting.isWinner[msg.sender], "You don't have a prize");
 
       uint prize;
       if(allWinnersMapper[_votingId].length == 1) {
         prize = currentVoting.totalAmount;
+        address payable winner = payable(msg.sender);
+        winner.transfer(prize);
+        currentVoting.isWinner[msg.sender] = false;
       } else {
         prize = currentVoting.totalAmount / allWinnersMapper[_votingId].length;
+        address payable winner = payable(msg.sender);
+        winner.transfer(prize);
+        currentVoting.isWinner[msg.sender] = false;
       }
-      address payable winner = payable(msg.sender);
-      winner.transfer(prize);
-      currentVoting.totalAmount = 0;
+     
     }
 
     function takeOwnersFee(uint _votingId) external onlyOwner {

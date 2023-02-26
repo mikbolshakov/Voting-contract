@@ -1,124 +1,83 @@
 import { time, loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import type { VotingContract } from "../typechain-types";
+import type { Signer } from "ethers";
 
-describe("Lock", function () {
-  // We define a fixture to reuse the same setup in every test.
-  // We use loadFixture to run this setup once, snapshot that state,
-  // and reset Hardhat Network to that snapshot in every test.
-  async function deployOneYearLockFixture() {
-    const ONE_YEAR_IN_SECS = 365 * 24 * 60 * 60;
-    const ONE_GWEI = 1_000_000_000;
+describe("VotingContract", function () {
+  const amount: number = 1000000;
+  async function deploy() {
+    const [c1, c2, c3, v1, v2, v3, v4, v5] = await ethers.getSigners();
 
-    const lockedAmount = ONE_GWEI;
-    const unlockTime = (await time.latest()) + ONE_YEAR_IN_SECS;
+    const Factory = await ethers.getContractFactory("VotingContract");
+    const votingContract: VotingContract = await Factory.deploy();
 
-    // Contracts are deployed using the first signer/account by default
-    const [owner, otherAccount] = await ethers.getSigners();
+    await votingContract.deployed();
 
-    const Lock = await ethers.getContractFactory("Lock");
-    const lock = await Lock.deploy(unlockTime, { value: lockedAmount });
-
-    return { lock, unlockTime, lockedAmount, owner, otherAccount };
+    return { votingContract, c1, c2, c3, v1, v2, v3, v4, v5 };
   }
 
-  describe("Deployment", function () {
-    it("Should set the right unlockTime", async function () {
-      const { lock, unlockTime } = await loadFixture(deployOneYearLockFixture);
+  async function addCandidate(
+    votingContract: VotingContract,
+    acc: Signer,
+    votingId = 1
+  ) {
+    const tx = await votingContract.connect(acc).addCandidate(votingId);
+    await tx.wait();
+  }
 
-      expect(await lock.unlockTime()).to.equal(unlockTime);
-    });
+  async function voteForCandidate(
+    votingContract: VotingContract,
+    acc: Signer,
+    candidate: string,
+    votingId = 1,
+    amount: 1000000
+  ) {
+    const tx = await votingContract
+      .connect(acc)
+      .voteForCandidate(votingId, candidate, { value: amount });
+    await tx.wait();
+  }
 
-    it("Should set the right owner", async function () {
-      const { lock, owner } = await loadFixture(deployOneYearLockFixture);
+  async function endVoting(
+    votingContract: VotingContract,
+    acc: Signer,
+    votingId = 1
+  ) {
+    const tx = await votingContract.connect(acc).endVoting(votingId);
+    await tx.wait();
+  }
 
-      expect(await lock.owner()).to.equal(owner.address);
-    });
+  it("Allows to vote and reveal winners", async function () {
+    const { votingContract, c1, c2, c3, v1, v2, v3, v4, v5 } =
+      await loadFixture(deploy);
 
-    it("Should receive and store the funds to lock", async function () {
-      const { lock, lockedAmount } = await loadFixture(
-        deployOneYearLockFixture
-      );
+    const addTx = await votingContract.addVoting();
+    await addTx.wait();
 
-      expect(await ethers.provider.getBalance(lock.address)).to.equal(
-        lockedAmount
-      );
-    });
+    await addCandidate(votingContract, c1);
+    await addCandidate(votingContract, c2);
+    await addCandidate(votingContract, c3);
 
-    it("Should fail if the unlockTime is not in the future", async function () {
-      // We don't use the fixture here because we want a different deployment
-      const latestTime = await time.latest();
-      const Lock = await ethers.getContractFactory("Lock");
-      await expect(Lock.deploy(latestTime, { value: 1 })).to.be.revertedWith(
-        "Unlock time should be in the future"
-      );
-    });
-  });
+    await time.increase(121);
 
-  describe("Withdrawals", function () {
-    describe("Validations", function () {
-      it("Should revert with the right error if called too soon", async function () {
-        const { lock } = await loadFixture(deployOneYearLockFixture);
+    await votingContract.startVoting(1);
+    
+    await voteForCandidate(votingContract, v2, c3.address, amount, 1000000);
+    await voteForCandidate(votingContract, v3, c1.address, amount, 1000000);
+    await voteForCandidate(votingContract, v1, c1.address, amount, 1000000);
+    await voteForCandidate(votingContract, v4, c2.address, amount, 1000000);
+    await voteForCandidate(votingContract, v5, c2.address, amount, 1000000);
 
-        await expect(lock.withdraw()).to.be.revertedWith(
-          "You can't withdraw yet"
-        );
-      });
+    await time.increase(121);
 
-      it("Should revert with the right error if called from another account", async function () {
-        const { lock, unlockTime, otherAccount } = await loadFixture(
-          deployOneYearLockFixture
-        );
+    await votingContract.endVoting(1);
 
-        // We can increase the time in Hardhat Network
-        await time.increaseTo(unlockTime);
+    // expect(await votingContract.numberOfVotes(1, c1.address)).to.eq(2);
 
-        // We use lock.connect() to send a transaction from another account
-        await expect(lock.connect(otherAccount).withdraw()).to.be.revertedWith(
-          "You aren't the owner"
-        );
-      });
-
-      it("Shouldn't fail if the unlockTime has arrived and the owner calls it", async function () {
-        const { lock, unlockTime } = await loadFixture(
-          deployOneYearLockFixture
-        );
-
-        // Transactions are sent using the first signer by default
-        await time.increaseTo(unlockTime);
-
-        await expect(lock.withdraw()).not.to.be.reverted;
-      });
-    });
-
-    describe("Events", function () {
-      it("Should emit an event on withdrawals", async function () {
-        const { lock, unlockTime, lockedAmount } = await loadFixture(
-          deployOneYearLockFixture
-        );
-
-        await time.increaseTo(unlockTime);
-
-        await expect(lock.withdraw())
-          .to.emit(lock, "Withdrawal")
-          .withArgs(lockedAmount, anyValue); // We accept any value as `when` arg
-      });
-    });
-
-    describe("Transfers", function () {
-      it("Should transfer the funds to the owner", async function () {
-        const { lock, unlockTime, lockedAmount, owner } = await loadFixture(
-          deployOneYearLockFixture
-        );
-
-        await time.increaseTo(unlockTime);
-
-        await expect(lock.withdraw()).to.changeEtherBalances(
-          [owner, lock],
-          [lockedAmount, -lockedAmount]
-        );
-      });
-    });
+    const winners = await votingContract.winners(1);
+    expect(winners).to.include.members([c1.address, c2.address]);
+    // expect(winners.length).to.eq(2);
+    expect(winners).not.to.include.members([c3.address]);
   });
 });
