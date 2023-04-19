@@ -4,7 +4,8 @@
 голосование длится некоторое время.
 
 пользователи могут голосовать за кандидата, переводя на контракт эфир.
-по завершении голосования победитель может снять средства, которые были внесены в это голосование, за исключением комиссии площадки.
+по завершении голосования победитель может снять средства, 
+которые были внесены в это голосование, за исключением комиссии площадки.
 владелец площадки должен иметь возможность выводить комиссию.
 
 покрыть контракт юнит-тестами;
@@ -24,38 +25,41 @@ contract VotingContract {
 
     struct Voting {
         address[] candidates;
+        address[] voters;
         mapping(address => bool) isCandidate;
-        mapping(address => uint) numberOfVotes;
+        mapping(address => uint256) numberOfVotes;
         mapping(address => address) voterChoices; // voter => candidate
-        mapping(address => bool) isWinner;
+        // mapping(address => bool) isWinner;
         Status votingStatus; // default Empty
-        uint startsAt;
-        uint endsAt;
-        uint fee;
-        uint totalAmount;
+        uint256 startsAt;
+        uint256 endsAt;
+        // uint256 fee;
+        // uint256 totalAmount;
     }
 
     address payable owner;
-    mapping(uint => Voting) public votings;
-    mapping(uint => address[]) public allWinnersMapper; // voting id => all winners
-    uint currentVotingId = 1;
+    mapping(uint256 => Voting) public votings;
+    // mapping(uint256 => address[]) public allWinnersMapper; // voting id => all winners
+    uint256 private currentVotingId; // = 1;
 
-    uint private constant VOTING_DURATION = 120;
-    uint private constant CANDIDATE_ADD_DURATION = 120;
-    uint constant BASE_PAYMENT = 1000000;
-    uint constant BASE_FEE = 3; // in percents
+    uint256 private constant VOTING_DURATION = 120;
+    uint256 private constant CANDIDATE_ADD_DURATION = 120;
+    // uint256 constant BASE_PAYMENT = 1000000;
+    // uint256 constant BASE_FEE = 3; // in percents
 
     constructor() {
-      owner = payable(msg.sender);
+        owner = payable(msg.sender);
     }
 
-    event VotingCreated(uint indexed votingId, uint startsAt);
-    event VotingStarted(uint indexed votingId, uint endsAt);
-    event VotingEnded(uint indexed votingId);
+    event VotingCreated(uint256 indexed votingId, uint256 startsAt);
+    event VotingStarted(uint256 indexed votingId, uint256 endsAt);
+    event VotingEnded(uint256 indexed votingId);
+    event CandidateAdded(uint256 indexed votingId, address indexed candidate);
+    event VotedForCandidate(uint256 indexed votingId, address indexed voter, address indexed candidate);
 
-    modifier onlyOwner {
-      require(msg.sender == owner, "You are not an owner");
-      _;
+    modifier onlyOwner() {
+        require(msg.sender == owner, "You are not an owner");
+        _;
     }
 
     function addVoting() external onlyOwner {
@@ -68,7 +72,7 @@ contract VotingContract {
         emit VotingCreated(currentVotingId, votings[currentVotingId].startsAt);
     }
 
-    function addCandidate(uint _votingId) external {
+    function addCandidate(uint256 _votingId) external {
         Voting storage currentVoting = votings[_votingId];
 
         require(
@@ -86,9 +90,11 @@ contract VotingContract {
 
         currentVoting.isCandidate[msg.sender] = true;
         currentVoting.candidates.push(msg.sender);
+
+        emit CandidateAdded(_votingId, msg.sender);
     }
 
-    function startVoting(uint _votingId) external onlyOwner {
+    function startVoting(uint256 _votingId) external onlyOwner {
         Voting storage currentVoting = votings[_votingId];
 
         require(
@@ -100,7 +106,7 @@ contract VotingContract {
             "There is no such vote"
         );
         require(
-            currentVoting.candidates.length >= 2,
+            currentVoting.candidates.length > 1,
             "No candidates for this vote"
         );
 
@@ -110,7 +116,10 @@ contract VotingContract {
         emit VotingStarted(_votingId, currentVoting.endsAt);
     }
 
-    function voteForCandidate(uint _votingId, address _candidate) external payable {
+    function voteForCandidate(
+        uint256 _votingId,
+        address _candidate
+    ) external payable {
         Voting storage currentVoting = votings[_votingId];
 
         require(
@@ -126,100 +135,113 @@ contract VotingContract {
             currentVoting.voterChoices[msg.sender] == address(0),
             "You have already voted"
         );
-        require(msg.value == BASE_PAYMENT, "Only fixed amount");
+        // require(msg.value == BASE_PAYMENT, "Only fixed amount");
 
-        uint voteFee = msg.value * BASE_FEE / 100;
-        uint voteAmount = msg.value - voteFee;
-        currentVoting.totalAmount += voteAmount;
-        currentVoting.fee += voteFee;
+        // uint256 voteFee = msg.value * BASE_FEE / 100;
+        // uint256 voteAmount = msg.value - voteFee;
+        // currentVoting.totalAmount += voteAmount;
+        // currentVoting.fee += voteFee;
 
         currentVoting.voterChoices[msg.sender] = _candidate;
         currentVoting.numberOfVotes[_candidate]++;
+        currentVoting.voters.push(msg.sender);
+
+        emit VotedForCandidate(_votingId, msg.sender, _candidate);
     }
 
-    function endVoting(uint _votingId) external onlyOwner {
+    function endVoting(uint256 _votingId) external onlyOwner {
         Voting storage currentVoting = votings[_votingId];
-        require(currentVoting.votingStatus == Status.Ongoing);
-        require(currentVoting.endsAt <= block.timestamp);
+        require(currentVoting.votingStatus == Status.Ongoing, "Voting is not going");
+        require(currentVoting.endsAt <= block.timestamp, "Voting is not over");
         votings[_votingId].votingStatus = Status.Finished;
 
         emit VotingEnded(_votingId);
     }
 
-    function winners(uint _votingId) external returns (address[] memory) {
+    function checkWinners(uint256 _votingId) external view returns (address[] memory) {
         Voting storage currentVoting = votings[_votingId];
 
-        require(currentVoting.votingStatus == Status.Finished, "Voting not finished");
+        require(
+            currentVoting.votingStatus == Status.Finished,
+            "Voting is not finished"
+        );
 
-        uint candidatesCount = currentVoting.candidates.length;
-        uint winnersCount;
-        uint maximumVotes = 0;
+        uint256 candidatesCount = currentVoting.candidates.length;
+        uint256 winnersCount = 0;
+        uint256 maximumVotes = 0;
         address[] memory localWinners = new address[](candidatesCount);
 
-        for (uint i = 0; i < candidatesCount; i++) {
+        for (uint256 i = 0; i < candidatesCount; i++) {
             address nextCandidate = currentVoting.candidates[i];
 
             if (currentVoting.numberOfVotes[nextCandidate] == maximumVotes) {
                 winnersCount += 1;
                 localWinners[winnersCount - 1] = nextCandidate;
-                currentVoting.isWinner[nextCandidate] = true;
+                // currentVoting.isWinner[nextCandidate] = true;
             }
 
             if (currentVoting.numberOfVotes[nextCandidate] > maximumVotes) {
                 maximumVotes = currentVoting.numberOfVotes[nextCandidate];
                 winnersCount = 1;
                 localWinners[0] = nextCandidate;
-                currentVoting.isWinner[nextCandidate] = true;
+                // currentVoting.isWinner[nextCandidate] = true;
             }
         }
 
         address[] memory allWinners = new address[](winnersCount);
 
-        for (uint i = 0; i < winnersCount; i++) {
+        for (uint256 i = 0; i < winnersCount; i++) {
             allWinners[i] = localWinners[i];
         }
-
-        return allWinnersMapper[_votingId] = allWinners;
+        return allWinners;
+        // return allWinnersMapper[_votingId] = allWinners;
     }
 
     function numberOfVotes(
-        uint _votingId,
+        uint256 _votingId,
         address _candidate
-    ) public view returns (uint) {
+    ) public view returns (uint256) {
         Voting storage currentVoting = votings[_votingId];
         return currentVoting.numberOfVotes[_candidate];
     }
 
-    function takeWinnersAmount(uint _votingId) external {
-      Voting storage currentVoting = votings[_votingId];
+    // function takeWinnersAmount(uint256 _votingId) external {
+    //     Voting storage currentVoting = votings[_votingId];
 
-      require(currentVoting.votingStatus == Status.Finished, "Voting not finished");
-      require(currentVoting.isWinner[msg.sender], "You don't have a prize");
+    //     require(
+    //         currentVoting.votingStatus == Status.Finished,
+    //         "Voting not finished"
+    //     );
+    //     require(currentVoting.isWinner[msg.sender], "You don't have a prize");
 
-      uint prize;
-      if(allWinnersMapper[_votingId].length == 1) {
-        prize = currentVoting.totalAmount;
-        address payable winner = payable(msg.sender);
-        winner.transfer(prize);
-        currentVoting.isWinner[msg.sender] = false;
-      } else {
-        prize = currentVoting.totalAmount / allWinnersMapper[_votingId].length;
-        address payable winner = payable(msg.sender);
-        winner.transfer(prize);
-        currentVoting.isWinner[msg.sender] = false;
-      }
-     
-    }
+    //     uint256 prize;
+    //     if (allWinnersMapper[_votingId].length == 1) {
+    //         prize = currentVoting.totalAmount;
+    //         address payable winner = payable(msg.sender);
+    //         winner.transfer(prize);
+    //         currentVoting.isWinner[msg.sender] = false;
+    //     } else {
+    //         prize =
+    //             currentVoting.totalAmount /
+    //             allWinnersMapper[_votingId].length;
+    //         address payable winner = payable(msg.sender);
+    //         winner.transfer(prize);
+    //         currentVoting.isWinner[msg.sender] = false;
+    //     }
+    // }
 
-    function takeOwnersFee(uint _votingId) external onlyOwner {
-      Voting storage currentVoting = votings[_votingId];
+    // function takeOwnersFee(uint256 _votingId) external onlyOwner {
+    //     Voting storage currentVoting = votings[_votingId];
 
-      require(currentVoting.votingStatus == Status.Finished, "Voting not finished");
-      require(currentVoting.fee > 0, "Fee is already taken");
+    //     require(
+    //         currentVoting.votingStatus == Status.Finished,
+    //         "Voting not finished"
+    //     );
+    //     require(currentVoting.fee > 0, "Fee is already taken");
 
-      owner.transfer(currentVoting.fee);
-      currentVoting.fee = 0;
-    }
+    //     owner.transfer(currentVoting.fee);
+    //     currentVoting.fee = 0;
+    // }
 
     fallback() external payable {}
 

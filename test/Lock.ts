@@ -5,7 +5,7 @@ import type { VotingContract } from "../typechain-types";
 import type { Signer } from "ethers";
 
 describe("VotingContract", function () {
-  const amount: number = 1000000;
+  // const amount: number = 1000000;
   async function deploy() {
     const [c1, c2, c3, v1, v2, v3, v4, v5] = await ethers.getSigners();
 
@@ -19,32 +19,32 @@ describe("VotingContract", function () {
 
   async function addCandidate(
     votingContract: VotingContract,
-    acc: Signer,
-    votingId = 1
+    account: Signer,
+    votingId = 0
   ) {
-    const tx = await votingContract.connect(acc).addCandidate(votingId);
+    const tx = await votingContract.connect(account).addCandidate(votingId);
     await tx.wait();
   }
 
   async function voteForCandidate(
     votingContract: VotingContract,
-    acc: Signer,
+    account: Signer,
     candidate: string,
-    votingId = 1,
-    amount: 1000000
+    votingId = 0,
+    // amount: 1000000
   ) {
     const tx = await votingContract
-      .connect(acc)
-      .voteForCandidate(votingId, candidate, { value: amount });
+      .connect(account)
+      .voteForCandidate(votingId, candidate) //, { value: amount });
     await tx.wait();
   }
 
   async function endVoting(
     votingContract: VotingContract,
-    acc: Signer,
+    account: Signer,
     votingId = 1
   ) {
-    const tx = await votingContract.connect(acc).endVoting(votingId);
+    const tx = await votingContract.connect(account).endVoting(votingId);
     await tx.wait();
   }
 
@@ -61,23 +61,23 @@ describe("VotingContract", function () {
 
     await time.increase(121);
 
-    await votingContract.startVoting(1);
+    await votingContract.startVoting(0);
     
-    await voteForCandidate(votingContract, v2, c3.address, amount, 1000000);
-    await voteForCandidate(votingContract, v3, c1.address, amount, 1000000);
-    await voteForCandidate(votingContract, v1, c1.address, amount, 1000000);
-    await voteForCandidate(votingContract, v4, c2.address, amount, 1000000);
-    await voteForCandidate(votingContract, v5, c2.address, amount, 1000000);
+    await voteForCandidate(votingContract, v1, c3.address) //, amount, 1000000);
+    await voteForCandidate(votingContract, v2, c1.address) //, amount, 1000000);
+    await voteForCandidate(votingContract, v3, c1.address) //, amount, 1000000);
+    await voteForCandidate(votingContract, v4, c2.address) //, amount, 1000000);
+    await voteForCandidate(votingContract, v5, c2.address) //, amount, 1000000);
 
     await time.increase(121);
 
-    await votingContract.endVoting(1);
+    await votingContract.endVoting(0);
 
-    // expect(await votingContract.numberOfVotes(1, c1.address)).to.eq(2);
+    expect(await votingContract.numberOfVotes(0, c1.address)).to.eq(2);
 
-    const winners = await votingContract.winners(1);
+    const winners = await votingContract.checkWinners(0);
     expect(winners).to.include.members([c1.address, c2.address]);
-    // expect(winners.length).to.eq(2);
+    expect(winners.length).to.eq(2); // votingContract.allWinnersMapper
     expect(winners).not.to.include.members([c3.address]);
   });
 });
